@@ -6,7 +6,6 @@ library(syuzhet)
 library(dplyr)
 library(class)
 library(randomForest)
-library(adabag)
 library(beepr)
 
 train = read.csv("C:\\Users\\Iita\\Documents\\machinelearningresources\\commenttrain.csv")
@@ -34,41 +33,34 @@ create_freq = function(data){
   return(freq)
 }
 
-
+# Creating a list of the subsets, in order: toxic, severe_toxic, obscene, threat, insult, identity_hate, neutral (== not toxic)
 list_subsets = list(subset(train, train$toxic==1), subset(train, train$severe_toxic==1),
                     subset(train, train$obscene==1), subset(train, train$threat==1), subset(train, train$insult==1),
                     subset(train, train$identity_hate==1), subset(train, train$toxic==0))
 
+list_freqs = lapply(list_subsets, create_freq) #list of frequency vectors
+list_ord_freqs = lapply(list_freqs, order) #list of ordered frequency vectors
 
-
-
-list_freqs = lapply(list_subsets, create_freq)
-list_ord_freqs = lapply(list_freqs, order)
-
-
+# function to fetch 500 most frequent words from a given corpus
 top500 = function(x,y){
   names(x[tail(y, n=500L)])
 }
 
-toplist = list(1,2,3,4,5,6,7)
+toplist = list()
 i=1
 while(i <= length(list_freqs)){
   toplist[[i]] = top500(list_freqs[[i]], list_ord_freqs[[i]])
   i = i + 1
 }
 
-
-
-
-#removing words in common
+#removing words in common, from first list of words
 removecommon = function(topwords1, topwords2){
   topwords1 = setdiff(topwords1, intersect(topwords1,topwords2))
   return(topwords1)
 }
 
-# to remove top 500 in all words from top 500 toxic words, 
-# topwords1 = top_toxic, topwords2 = top_all
-cleantoplist = list(1,2,3,4,5,6)
+#remove words in list of top 500 neutral words from the toxic lists
+cleantoplist = list()
 x=1
 while(x <length(list_freqs)){
   cleantoplist[[x]] = removecommon(toplist[[x]],toplist[[length(toplist)]])
@@ -76,7 +68,7 @@ while(x <length(list_freqs)){
 }
 
 cleantoplist
-
+#remove words in top toxic lists from the neutral list
 cleanneutral = 1
 y = 1
 while(y < length(toplist)){
@@ -84,6 +76,7 @@ while(y < length(toplist)){
   y = y+1
 }
 
+#combine the two sets
 cleantoplist = c(cleantoplist, cleanneutral)
 
 cleantoplist
@@ -91,13 +84,6 @@ cleantoplist
 
 #########################################################################################
 # generating full set of data for proportion of given corpus' words in given comment
-
-#creating a vector of frequencies for corpuses (corpusii, not corpsii, but whatever)
-#corpsii is useless on its own, just there to help with frequencies
-
-# creates a function to return frequencies of a single comment's corpus (just to get the names later)
-# so fucking roundabout I know
-
 
 #data needs to be data$comment_text
 create_freq1 = function(data){
@@ -109,22 +95,25 @@ create_freq1 = function(data){
   return(freq)
 }
 
-create_freq1(toxic$comment_text)[1] # returns first word in toxic corpus freq
-create_freq1(toxic$comment_text[1]) # returns freq of first comment in toxic set
-frequencies_all = list()
+## create_freq1(toxic$comment_text)[1] # returns first word in toxic corpus freq
+## create_freq1(toxic$comment_text[1]) # returns freq of first comment in toxic set
 
+# this is rather time-intensive, perhaps there's a faster way? something other than a while-loop
+frequencies_all = list()
 i = 1
 while(i <= length(allcom$comment_text)){
   frequencies_all[[i]] = names(create_freq1(allcom$comment_text[i]))
   i = i+1
 }
 
-
+# function for comparing proportion of given corpus' top words to all words in comment (but can also be used
+# for comparing other corpus' to other texts)
 comparecorpus = function(topwords, commentwords){
   length(intersect(topwords, commentwords))/length(commentwords)
 }
 
-
+# creating a vector with the proportions of a given list of words in given comment
+# probably not the best way to do this, check later
 proportions = function(topwords){
   wordlistvector = 1:20
   for(i in 1:length(allcom$comment_text)){
@@ -133,10 +122,9 @@ proportions = function(topwords){
   return(wordlistvector)
 }
 
-#returns a vector of all comments' proportion of top toxic words, hopefully
-comments_toxic = proportions(cleantoplist[[1]])
+# comments_toxic = proportions(cleantoplist[[1]]) #returns a vector of all comments' proportion of top toxic words, hopefully
 
-corpusproportions = list() # will end up as a list of all cleaned toplists' proportions to all comments; 7 superlists
+corpusproportions = list() # will end up as a list of all cleaned toplists' proportions to each comment; 7 superlists
 x = 1
 while(x <= length(cleantoplist)){
   corpusproportions[[x]] = proportions(cleantoplist[[x]])
@@ -145,7 +133,7 @@ while(x <= length(cleantoplist)){
 
 
 
-#sentiment generation, in groups because previous method was so heavy
+# sentiment generation, in groups because previous method was so heavy
 sentiment1 = get_sentiment(allcom$comment_text[1:52000], method="afinn")
 sentiment2 = get_sentiment(allcom$comment_text[52001:104000], method = "afinn")
 sentiment3 = get_sentiment(allcom$comment_text[104001:156000], method = "afinn")
@@ -155,6 +143,7 @@ sentiment6 = get_sentiment(allcom$comment_text[260001:312735], method="afinn")
 
 sentiment = c(sentiment1, sentiment2, sentiment3, sentiment4, sentiment5, sentiment6)
 
+# because sentiment turned out to be the most robust attribute, adding a second method in hopes of increasing accuracy
 sentiment7 = get_sentiment(allcom$comment_text[1:52000], method="nrc")
 sentiment8 = get_sentiment(allcom$comment_text[52001:104000], method = "nrc")
 sentiment9 = get_sentiment(allcom$comment_text[104001:156000], method = "nrc")
@@ -164,15 +153,13 @@ sentiment12 = get_sentiment(allcom$comment_text[260001:312735], method="nrc")
 
 sentiments2 = c(sentiment7, sentiment8, sentiment9, sentiment10, sentiment11, sentiment12)
 
-
-
-
+# creating the base of the set for testing; proportion of each type of corpus' top list, plus the two sentiments
 sentiments_check = cbind(corpusproportions[[1]], corpusproportions[[2]],corpusproportions[[3]],
                          corpusproportions[[4]], corpusproportions[[5]], corpusproportions[[6]],
                          corpusproportions[[7]], sentiment, sentiments2)
-
-sentiments_check[is.na(sentiments_check)==TRUE] = 0
-
+                         
+# some NAs were introduced from comments with zero non-stopword words, cleaning those
+sentiments_check[is.na(sentiments_check)==TRUE] = 0 
 
 normalize = function(x){
   return((x-min(x))/ (max(x)-min(x)))
@@ -183,11 +170,11 @@ sentiments_check[,9] = normalize(sentiments_check[,9])
 
 summary(sentiments_check)
 
-
-
+# creating a copy of all comment text for creating indicators for punctuation and uppercase
 punctuation1 = allcom$comment_text
 punctuation1 = gsub("\n", "", punctuation1)
 
+# counts the incidences of given type of punctuation in data x
 sum_punctuation = function(x, punctuation){
   sum(gregexpr(punctuation,x)[[1]]>0)
 }
@@ -200,6 +187,7 @@ while(y<=length(punc_options)){
   puncprops[[y]] = unlist(lapply(punctuation1,sum_punctuation,punctuation = punc_options[[y]]))
   y = y+1
 }
+
 puncprops_df = cbind(puncprops[[1]], puncprops[[2]], puncprops[[3]], puncprops[[4]], puncprops[[5]])
 colnames(puncprops_df) = c("allpunc", "exclam", "quest", "comma", "period")
 
@@ -216,9 +204,11 @@ charactercount = function(x){
   nchar(x)
 }
 
+# creating a vector of comment character count
+# this should probably also be an indicator on its own, or maybe nwords should
 characters = unlist(lapply(punctuation1, charactercount))
 
-#proportion of punctuation to length of comment
+#proportion of punctuation (x) to length of comment
 props = function(x){
   return(x/characters)
 }
@@ -230,12 +220,14 @@ while(y<=length(punc_options)){
   y=y+1
 }
 
+# creating a matrix of each type of punctuation's proportion to each comment's length
 puncprops_df = cbind(puncprops_df, puncprops2[[1]], puncprops2[[2]], puncprops2[[3]], puncprops2[[4]], puncprops2[[5]])
 
 colnames(puncprops_df) = c("allpunc", "exclam", "quest", "comma", "period", "expro", "allpuncprop", "exclprop", "qprop",
                            "commaprop", "periodprop")
 
-# this is just what needs to be done to comments to get anything useful out of them outside the corpus
+# creating a copy of comment texts without whitespaces, numbers, punctuation - just letters, for checking uppercase
+# this function mostly cleans a piece of raw text
 
 cleancomments = function(cleaned){
   cleaned = removePunctuation(cleaned)
@@ -246,10 +238,10 @@ cleancomments = function(cleaned){
 }
 
 
-
 caps = allcom$comment_text
 caps = cleancomments(caps)
 
+# makes each comment a list of letters, then counts number of uppercase letters
 caps = strsplit(caps, "")
 
 capssum = lapply(caps, is_upper)
@@ -260,19 +252,13 @@ commentletters = function(x){
   str_length(gsub(" ", "", x))
 }
 
-#needs unlist(lapply) to get vectors instead of whatever [[1]] is
-
+# needs unlist(lapply) to get vectors instead of whatever [[1]] is ##turns out it's nested lists
+# capsprop == proportion of uppercase to all letters
+# commentlengths could be its own indicator
 commentlengths = unlist(lapply(punctuation1, commentletters))
 capsprop = capssum/commentlengths
 
 puncprops_df = cbind(puncprops_df, capsprop)
-
-
-
-normalize = function(x){
-  return((x-min(x))/ (max(x)-min(x)))
-}
-
 
 secondary_nor = apply(puncprops_df, 2, normalize)
 
@@ -282,10 +268,6 @@ colnames(sentiments_check) = c("toxic","severe_toxic","obscene","threat","insult
                                "neutral","sentiment",
                                "sentiments2", "allpunc", "exclam", "quest", "comma", "period", "expro", "allpuncprop", "exclprop",
                                "qprop","commaprop", "periodprop", "capsprop")
-
-
-train1 = sentiments_check[1:159571,]
-test1 = sentiments_check[159572:312735,]
 
 train_labels1 = train[1:159571,3:8]
 
