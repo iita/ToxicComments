@@ -365,7 +365,7 @@ boost_insult = boost5
 boost_identity_hate = boost6
 
 pred_prob = function(x){
-  predict(x, test1, type="prob")[,2]
+  predict(x, test1, type="prob")$prob[,2]
 }
 
 boosts = list(boost_toxic, boost_severe_toxic, boost_obscene, boost_threat, boost_insult, boost_identity_hate)
