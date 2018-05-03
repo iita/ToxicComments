@@ -1,0 +1,392 @@
+started = time.time()
+
+import numpy as np
+import pandas as pd
+import nltk
+from nltk.corpus import stopwords
+from nltk.classify import SklearnClassifier
+from wordcloud import WordCloud,STOPWORDS
+import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize,sent_tokenize
+from nltk.stem import *
+import string
+from string import punctuation
+import gensim
+import time
+from gensim.corpora import Dictionary
+from nltk.probability import FreqDist
+import winsound
+from nltk.sentiment.vader import SentimentIntensityAnalyzer as SIA
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
+from nltk.sentiment import mark_negation
+
+df_train = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttrain.csv")
+df_test = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttest.csv")
+df_labels = df_train[["toxic","severe_toxic","obscene","threat","insult","identity_hate"]]
+
+
+all_text = [df_train.comment_text,df_test.comment_text]
+all_text = pd.concat(all_text, ignore_index=True)
+
+def removedigit(x):
+    return ''.join(ch for ch in x if not ch.isdigit())
+
+def removepunctuation(x):
+    return ''.join(ch for ch in x if not ch in punctuation)
+
+def collectpunctuation(x):
+    return ''.join(ch for ch in x if ch in punctuation) #just for fun, this creates a list of punctuation in comments
+
+def collectdigits(x):
+    return ''.join(ch for ch in x if ch.isdigit()) #as above, but with just numbers
+
+
+stop_words = set(stopwords.words("english"))
+
+def removestopwords(x):
+    return ' '.join(word for word in x if not word in stop_words)
+
+def removespam(x):
+    return ''.join(word for word in x if not len(word)>50)
+
+stemmer = PorterStemmer()
+
+
+def preprocess_before(x):
+    x = x.str.replace("\s+", " ")
+    x = x.str.lower()
+    x = x.str.replace("i'm", "i am")
+    x = x.str.replace("he's", "he is")
+    x = x.str.replace("she's", "she is")
+    x = x.str.replace("'re", " are")
+    x = x.str.replace("can't", "can not")
+    x = x.str.replace("don't", "do not")
+    x = x.str.replace("'ve", " have")
+    x = x.str.replace("'ll", " will")    
+    x = x.apply(removedigit)
+    x = x.apply(removepunctuation)
+    x = x.apply(word_tokenize)
+    return(x)
+
+start_time = time.time()    
+usable_text = preprocess_before(all_text)    
+    
+bigram = gensim.models.Phrases(usable_text)
+    
+    
+def preprocess_after(x):
+    x = x.apply(removestopwords)
+#    x = x.apply(word_tokenize)
+    x = x.apply(removespam)
+    x = x.apply(word_tokenize)
+    return(x)
+    
+    
+usable_text = preprocess_after(usable_text)
+
+end_time = time.time()
+print("time taken:", end_time-start_time,"s")
+    
+bigram[usable_text.iloc[120]]
+
+start_time = time.time()
+
+bigrams = []
+
+for comment in usable_text:
+    asd = bigram[comment]
+    bigrams.append(asd)
+
+
+text_ready = bigrams
+dictionary = Dictionary(text_ready)
+corpus_gen = (dictionary.doc2bow(text) for text in text_ready)
+
+corpus = []
+for y in corpus_gen:
+    corpus.append(y)
+
+open_corpus_sub = []
+open_corpus = []
+for comment in corpus:
+    for item in comment:
+        open_corpus_sub.append(dictionary[item[0]])
+    open_corpus.append(open_corpus_sub)
+    open_corpus_sub = []
+    
+winsound.Beep(500,100)    
+train_ready = pd.concat([pd.Series(text_ready[0:159570]), df_labels], axis=1, ignore_index=True)
+train_ready = train_ready.dropna(0,how="any")
+test_ready = text_ready[159571:]
+colnames = ["comment_text", "toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+
+train_ready.columns = colnames
+
+toxic1 = train_ready["toxic"]==1
+toxic = train_ready[toxic1].reset_index()
+severe_toxic1 = train_ready["severe_toxic"]==1
+severe_toxic = train_ready[severe_toxic1].reset_index()
+obscene1 = train_ready["obscene"]==1
+obscene = train_ready[obscene1].reset_index()
+threat1 = train_ready["threat"]==1
+threat = train_ready[threat1].reset_index()
+insult1 = train_ready["insult"]==1
+insult = train_ready[insult1].reset_index()
+identity_hate1 = train_ready["identity_hate"]==1
+identity_hate = train_ready[identity_hate1].reset_index()
+neutral1 = train_ready["toxic"]==0
+neutral = train_ready[neutral1].reset_index()
+
+comment_types = [toxic["comment_text"], severe_toxic["comment_text"], obscene["comment_text"], 
+threat["comment_text"], insult["comment_text"], identity_hate["comment_text"], neutral["comment_text"]]
+
+def get_corpus(comment_index):
+    type_index = train_ready[comment_index].index.tolist()
+    type_corpus_gen = (open_corpus[i] for i in type_index)
+    type_corpus = []
+    for z in type_corpus_gen:
+        type_corpus.append(z)
+    return(type_corpus)
+    
+    
+index_types = [toxic1, severe_toxic1, obscene1, threat1, insult1, identity_hate1, neutral1]    
+corpus_text = []
+for i in index_types:
+    corpus_text.append(get_corpus(i))    
+
+dictionary_toxic = Dictionary(comment_types[0])
+dictionary_severe_toxic = Dictionary(comment_types[1])
+dictionary_obscene = Dictionary(comment_types[2])
+dictionary_threat = Dictionary(comment_types[3])
+dictionary_insult = Dictionary(comment_types[4])
+dictionary_identity_hate = Dictionary(comment_types[5])
+dictionary_neutral = Dictionary(comment_types[6])
+
+winsound.Beep(500,100)
+
+dict_types = []
+for u in range(len(comment_types)):
+    dict_types.append(Dictionary(comment_types[u]))
+
+start_time = time.time()    
+top500_words = []
+
+def get_top500(commentset):
+    comments_words = [item for items in comment_types[commentset] for item in items]
+    freq_words = FreqDist(comments_words)
+    top500 = freq_words.most_common(500)
+    for i in range(0,500):
+        top500_words.append(top500[i][0])
+
+
+for i in range(len(comment_types)):
+    get_top500(i)
+
+def chunks(l,n):
+    for i in range(0,len(l),n):
+        yield l[i:i + n]
+
+toplists = list(chunks(top500_words,500))
+
+# other words from neutral and neutral from others
+
+commonwords = []
+for x in range(len(comment_types)-1):
+    commonwords.append(set(toplists[6]).intersection(toplists[x]))
+    toplists[x] = set(toplists[x])-set(commonwords[x])
+    toplists[6] = set(toplists[6])-set(commonwords[x])
+
+
+
+corpus_comparison = [[],[],[],[],[],[],[]]
+
+def comparewords(text, toplist):
+    match = [word for word in text if word in toplist]
+    return(match)
+
+for comment in open_corpus:
+    for i in range(len(corpus_comparison)):
+        corpus_comparison[i].append(comparewords(comment,toplists[i]))
+
+end_time = time.time()
+print("time:",end_time-start_time,"s")
+winsound.Beep(500,100)
+
+corpus_prop = [[],[],[],[],[],[],[]]
+
+for x in range(len(open_corpus)):
+    for y in range(len(corpus_comparison)):
+        if len(open_corpus[x]) != 0:
+            corpus_prop[y].append(len(corpus_comparison[y][x])/len(open_corpus[x]))
+        else:
+            corpus_prop[y].append(0)
+
+beep1 = winsound.Beep(500,100)
+
+sia = SIA()
+score1 = sia.polarity_scores(all_text[1])
+
+start_time = time.time()
+sentiments_dict = []
+for comment in all_text:
+    sentiments_dict.append(sia.polarity_scores(comment))
+
+end_time = time.time()
+print(end_time-start_time)
+beep1
+
+sentiments = [[],[],[],[]]
+
+for item in sentiments_dict:
+    sentiments[0].append(item["compound"])
+    sentiments[1].append(item["neg"])
+    sentiments[2].append(item["neu"])
+    sentiments[3].append(item["pos"])
+
+
+df_corpusprop = pd.DataFrame(corpus_prop[:])
+df_corpusprop = df_corpusprop.transpose()
+df_corpusprop.columns = ["toxic_words", "severe_toxic_words", "obscene_words", "threat_words", "insult_words", "identity_hate_words", "neutral_words"]
+
+df_sentiments = pd.DataFrame(sentiments[:]).T
+df_sentiments.columns = ["compound", "neg", "neu", "pos"]
+
+allpunctuation = all_text.apply(collectpunctuation)
+commentlength_full = all_text.apply(len)
+
+allpunct_prop = []
+for i in range(len(commentlength_full)):
+    allpunct_prop.append(len(allpunctuation[i])/commentlength_full[i])
+    
+def checkupper(text):
+    upper = [(ch.isupper()) for ch in text]
+    return(upper)
+
+upper1 = sum(checkupper(all_text[1]))
+
+
+def getletters(text):
+    letters = [ch.isalpha() for ch in text]
+    return(letters)
+
+letters1 = getletters(all_text[1])
+sum(letters1)
+
+
+start_time = time.time()
+caps = []
+for comment in all_text:
+    if sum(getletters(comment)) != 0:
+        caps.append(sum(checkupper(comment))/sum(getletters(comment)))
+    else:
+        caps.append(0)
+
+end_time = time.time()
+print(end_time-start_time)
+
+punc_options = [".", ",", "!", "?"]
+
+def getperiod(item,x):
+    periods = [ch for ch in item if ch == punc_options[x]]
+    return(periods)
+
+puncs = [[],[],[],[]]
+for item in allpunctuation:
+    for i in range(len(punc_options)):
+        period = (getperiod(item, i))
+        puncs[i].append(period)
+
+puncprops = [[],[],[],[]]
+for i in range(len(puncprops)):
+    for u in range(len(commentlength_full)):
+        puncprops[i].append(len(puncs[i][u])/commentlength_full[u])
+        
+        
+def normalize(x):
+    return((x-min(x))/(max(x)-min(x)))
+    
+allpunct_prop_n = normalize(allpunct_prop).tolist()
+periods_n = normalize(puncprops[0]).tolist()
+commas_n = normalize(puncprops[1]).tolist()
+exclamations_n = normalize(puncprops[2]).tolist()
+questionmarks_n = normalize(puncprops[3]).tolist()
+commentlength_n = normalize(commentlength_full).tolist()
+
+properties = [allpunct_prop, caps, periods_n, commas_n, exclamations_n, questionmarks_n, commentlength_n]
+
+df_properties = pd.DataFrame(properties).T
+df_properties.columns = ["allpunct_prop", "caps", "periods", "commas", "exclamations","questionmarks","commentlength"]
+
+df_all = pd.concat([df_corpusprop, df_sentiments, df_properties], axis=1)
+df_all.describe()
+
+train1 = df_all[0:159571]
+train1.head()
+test1 = df_all[159571:]
+
+ids = df_test["id"]
+ids = ids.tolist()
+ids = pd.DataFrame(ids)
+
+start_time = time.time()
+
+rf = RandomForestRegressor(n_estimators=1000, random_state=42)
+
+rf.fit(train1, df_labels)
+predictions = rf.predict(test1)
+
+end_time = time.time()
+print("RandomForest training took ", (end_time-start_time)/60, " minutes.")
+beep1
+submission = pd.DataFrame(predictions)
+submission.columns = ["toxic","severe_toxic","obscene","threat","insult","identity_hate"]
+
+
+sub = pd.concat([ids,submission], axis=1)
+sub.columns = ["id","toxic","severe_toxic","obscene","threat","insult","identity_hate"]
+sub.to_csv("pythonsubmission.csv",index=False, sep=",",line_terminator="\r",header=True)
+
+start_time = time.time()
+clf = RandomForestClassifier(n_estimators=1000, random_state=42)
+clf.fit(train1, df_labels)
+pred_prob = clf.predict_proba(test1)
+mid_time = time.time()
+print("training + predict took ", (mid_time-start_time)/60, " minutes")
+
+extract_prob = [[],[],[],[],[],[]]
+for x in range(len(extract_prob)):
+    for t in range(len(pred_prob[1])):
+        extract_prob[x].append(pred_prob[x][t][1])
+        
+
+prob_submission = pd.DataFrame(extract_prob[:]).T
+prob_submission.columns = ["toxic","severe_toxic","obscene","threat","insult","identity_hate"]
+subp = pd.concat([ids, prob_submission], axis=1)
+subp.columns = ["id","toxic","severe_toxic","obscene","threat","insult","identity_hate"]
+subp.to_csv("pythonprobsubmission.csv", index=False, sep=",", line_terminator="\r", header=True)
+end_time = time.time()
+print("creating file took ", end_time-mid_time, "s")
+print("the entire process took ", (end_time-start_time)/60, " minutes.")
+beep1
+
+clf.feature_importances_
+
+
+# array([ 0.20304443,  0.05003947,  0.03369445,  0.04272631,  0.03420858,
+#        0.03727424,  0.02649181,  0.09742959,  0.10471835,  0.06380282,
+#        0.03161588,  0.04787666,  0.06134012,  0.03902663,  0.02728271,
+#        0.02295362,  0.0183309 ,  0.05814345])
+
+
+clf2 = RandomForestClassifier(n_estimators=1000, random_state=42, criterion="entropy")
+clf2.fit(train1, df_labels)
+clf2.feature_importances_
+
+base_sentiment = []
+for c in range(len(all_text)):
+    for texts in all_text:
+        comment = texts.split()
+        base_sentiment.append(mark_negation(comment, double_neg_flip=True, shallow=False))
