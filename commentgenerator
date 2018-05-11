@@ -1,0 +1,33 @@
+
+import numpy as np
+import pandas as pd
+import markovify as mk
+
+
+df_train = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttrain.csv")
+df_test = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttest.csv")
+df_labels = df_train[["toxic","severe_toxic","obscene","threat","insult","identity_hate"]]
+
+
+threat = df_train.loc[df_train["threat"]==1,["comment_text"]].reset_index(drop=True)
+
+doc_threat = threat["comment_text"].tolist()
+nchar = int(threat.comment_text.str.len().median())
+
+text_model = mk.Text(doc_threat)
+
+for i in range(10):
+    print(text_model.make_short_sentence(nchar))
+    
+
+
+toxic = df_train.loc[df_train["toxic"]==1,["comment_text"]].reset_index(drop=True)
+
+doc_toxic = toxic["comment_text"].tolist()
+nchar1 = int(toxic.comment_text.str.len().median())
+toxic_model = mk.Text(doc_toxic)
+nchar1
+
+for i in range(20):
+    print(toxic_model.make_short_sentence(nchar1))
+    
