@@ -1,0 +1,358 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 14 17:43:22 2018
+
+@author: Iita
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 14 14:22:07 2018
+
+@author: Iita
+"""
+
+# -*- coding: utf-8 -*-
+
+import pandas as pd
+from nltk.corpus import stopwords
+from string import punctuation
+from nltk.tokenize import word_tokenize
+from collections import defaultdict
+import gensim
+from gensim import corpora
+from nltk.stem import WordNetLemmatizer
+
+from gensim.models import ldamodel
+import time
+from pprint import pprint
+from gensim.models import CoherenceModel
+import matplotlib.pyplot as plt
+import winsound
+
+
+start_all = time.time()
+
+df_train = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttrain.csv")
+df_test = pd.read_csv(r"C:\Users\Iita\Documents\machinelearningresources\commenttest.csv")
+df_labels = df_train[["toxic","severe_toxic","obscene","threat","insult","identity_hate"]]
+
+
+all_text = [df_train.comment_text,df_test.comment_text]
+all_text = pd.concat(all_text, ignore_index=True)
+
+
+
+def removedigit(x):
+    return ''.join(ch for ch in x if not ch.isdigit())
+
+def removepunctuation(x):
+    return ''.join(ch for ch in x if not ch in punctuation)
+
+def collectpunctuation(x):
+    return ''.join(ch for ch in x if ch in punctuation) #just for fun, this creates a list of punctuation in comments
+
+def collectdigits(x):
+    return ''.join(ch for ch in x if ch.isdigit()) #as above, but with just numbers
+
+
+stop_words = set(stopwords.words("english"))
+
+def removestopwords(x):
+    return ' '.join(word for word in x if not word in stop_words)
+
+def removespam(x):
+    return ''.join(word for word in x if not len(word)>50)
+
+
+
+def preprocess_before(x):
+    x = x.str.replace("\s+", " ")
+    x = x.str.lower()
+    x = x.str.replace("i'm", "i am")
+    x = x.str.replace("he's", "he is")
+    x = x.str.replace("she's", "she is")
+    x = x.str.replace("'re", " are")
+    x = x.str.replace("can't", "can not")
+    x = x.str.replace("don't", "do not")
+    x = x.str.replace("'ve", " have")
+    x = x.str.replace("'ll", " will")    
+    x = x.apply(removedigit)
+    x = x.apply(removepunctuation)
+    x = x.apply(word_tokenize)
+    return(x)
+
+usable_text = preprocess_before(all_text)  
+
+bigram = gensim.models.Phrases(usable_text)
+    
+def preprocess_after(x):
+    x = x.apply(removestopwords)
+    x = x.apply(removespam)
+    x = x.apply(word_tokenize)
+    return(x)
+    
+
+usable_text = preprocess_after(usable_text)
+    
+
+frequency = defaultdict(int)
+for text in usable_text:
+    for token in text:
+        frequency[token] += 1
+
+usable_texts = [[token for token in text if frequency[token] > 100] for text in usable_text]
+
+
+
+
+lemmatizer = WordNetLemmatizer()
+
+def lemming(x):
+    lemlist = [lemmatizer.lemmatize(word) for word in x]
+    return lemlist
+
+
+lemming(usable_text[1])
+
+lemmed_text = usable_text.apply(lemming)
+
+usable_text = lemmed_text
+
+comlen = [len(comment) for comment in usable_text]
+emptycomments = [i for i,j in enumerate(comlen) if j==0]
+
+
+
+usable_noempty = list(filter(None, usable_text))
+usable_noempty = pd.Series(usable_noempty)
+
+dictionary_train = corpora.Dictionary(usable_noempty)
+dictionary_train.save("dict1.dict")
+
+corpus_train = [dictionary_train.doc2bow(text) for text in usable_noempty]
+
+
+lda_start = time.time()
+def lda_mod_get(x):
+    newmod = ldamodel.LdaModel(corpus_train, id2word=dictionary_train, num_topics=x, passes=10,per_word_topics=True)
+    return(newmod)
+    
+lda_models = []
+for x in range(5,20):
+    lda_models.append(lda_mod_get(x))
+
+def perplexity_get(y):
+    newperpl = lda_models[y].log_perplexity(corpus_train)
+    return(newperpl)
+
+perplexities = []
+for y in range(15):
+    perplexities.append(perplexity_get(y))
+
+def coherence_get(t):
+    coherence_model_lda = CoherenceModel(model=lda_models[t], texts=usable_noempty, dictionary=dictionary_train, coherence='c_v')
+    coherence_lda = coherence_model_lda.get_coherence()
+    return(coherence_lda)
+
+coherences = []
+for t in range(15):
+    coherences.append(coherence_get(t))
+
+
+lda_end = time.time()
+
+print("time taken: ", (lda_end-lda_start)/3600)
+
+plt.plot(coherences, perplexities, "bx")
+
+
+pprint(lda_mod.print_topics())
+
+
+dictionary = corpora.Dictionary(usable_text)
+
+corpus = [dictionary.doc2bow(text) for text in usable_text]
+
+
+
+pd.DataFrame([coherences,perplexities]).T 
+
+           0         1
+0   0.579825 -8.853879
+1   0.585623 -8.890865
+2   0.571646 -8.938671
+3   0.556316 -8.947374
+4   0.592090 -8.988743
+5   0.593494 -9.007365
+6   0.562249 -9.042862
+7   0.600276 -9.057424
+8   0.592836 -9.094422
+9   0.564794 -9.122075
+10  0.575367 -9.159757
+11  0.581691 -9.165080
+12  0.567470 -9.190270
+13  0.556108 -9.226153
+14  0.536850 -9.243896
+
+# best model = 8, aka 13 topics, next best is model 11, 16 topics
+
+lda_models[8].print_topics()
+
+
+lda_mod.get_document_topics(corpus[1])
+
+topic_list = [lda_models[8].get_document_topics(text) for text in corpus]
+
+primary_topic = [comment[0][0] for comment in topic_list]
+primary_prop = [comment[0][1] for comment in topic_list]
+
+secondary_topic = [comment[1][0] if len(comment)>1 else None for comment in topic_list]
+secondary_prop = [comment[1][1] if len(comment)>1 else None for comment in topic_list]
+
+topic_n = [len(comment) for comment in topic_list]
+
+
+plt.plot(primary_topic[0:5000], topic_n[0:5000], "b.")
+
+attributes = [primary_topic, primary_prop, secondary_topic, secondary_topic, topic_n, all_text.tolist()]
+df_data = pd.DataFrame(attributes).T
+df_data.columns=["primary_topic","primary_prop", "secondary_topic", "secondary_prop", "n_topics", "fulltext"]
+
+high3 = df_data[(df_data.primary_prop > 0.99) & (df_data.primary_topic == 2)]
+exploring = high3.fulltext
+
+
+import pickle
+model = lda_models[8]
+pkl_file = "topics13_model.pkl"
+with open(pkl_file, "wb") as file:
+    pickle.dump(model,file)
+
+
+with open(pkl_file, "rb") as file:
+    pickle_model = pickle.load(file)
+
+
+pickle_model.print_topics()
+
+
+model2 = lda_models[11]
+pkl_file2 = "topics16_model.pkl"
+with open(pkl_file2, "wb") as file2:
+    pickle.dump(model2, file2)
+
+with open(pkl_file2, "rb") as file2:
+    pickle_model2 = pickle.load(file2)
+
+#[(0,
+#  '0.035*"wtf" + 0.033*"omfg" + 0.023*"gay" + 0.023*"nigger" + 0.023*"fucking" ' #id-hate
+#  '+ 0.020*"shit" + 0.016*"u" + 0.013*"cock" + 0.012*"nyan" + 0.011*"bitch"'),
+# (1,
+#  '0.043*"page" + 0.030*"wikipedia" + 0.023*"please" + 0.021*"image" + '
+#  '0.017*"use" + 0.015*"link" + 0.014*"help" + 0.014*"article" + 0.013*"thank" ' #polite edits
+#  '+ 0.012*"thanks"'),
+# (2,
+#  '0.081*"fuck" + 0.036*"cunt" + 0.019*"suck" + 0.013*"dick" + 0.011*"youfuck" ' # abuse but also Persian/Arabic?
+#  '+ 0.007*"prick" + 0.007*"و" + 0.006*"u" + 0.006*"da" + 0.005*"در"'),           # need more topics
+# (3,
+#  '0.009*"nigga" + 0.008*"game" + 0.007*"year" + 0.007*"utc" + 0.005*"film" + ' #repeating nonsense
+#  '0.005*"new" + 0.005*"song" + 0.004*"day" + 0.004*"album" + 0.004*"video"'),
+# (4,
+#  '0.011*"like" + 0.010*"one" + 0.010*"would" + 0.010*"think" + 0.009*"know" + ' #
+#  '0.009*"article" + 0.008*"time" + 0.008*"people" + 0.007*"page" + '
+#  '0.007*"make"'),
+# (5,
+#  '0.020*"block" + 0.013*"admins" + 0.013*"vandalism" + 0.012*"user" + '
+#  '0.012*"blocked" + 0.012*"ip" + 0.010*"warning" + 0.009*"account" + '
+#  '0.008*"vandal" + 0.008*"reedelliot"'),
+# (6,
+#  '0.033*"article" + 0.020*"source" + 0.012*"section" + 0.008*"reference" + '
+#  '0.008*"also" + 0.007*"would" + 0.007*"one" + 0.006*"information" + '
+#  '0.006*"used" + 0.005*"list"'),
+# (7,
+#  '0.009*"school" + 0.008*"lame" + 0.007*"child" + 0.007*"book" + '
+#  '0.006*"woman" + 0.005*"published" + 0.005*"university" + 0.004*"john" + '
+#  '0.004*"christian" + 0.004*"god"'),
+# (8,
+#  '0.019*"poop" + 0.013*"penis" + 0.011*"’" + 0.011*"english" + 0.008*"state" '
+#  '+ 0.008*"people" + 0.008*"country" + 0.007*"american" + 0.007*"name" + '
+#  '0.007*"language"'),
+# (9,
+#  '0.034*"article" + 0.032*"page" + 0.028*"please" + 0.021*"deletion" + '
+#  '0.013*"deleted" + 0.013*"•" + 0.012*"wikipedia" + 0.011*"editing" + '
+#  '0.011*"talk" + 0.011*"edit"')]
+
+
+[(0,
+  '0.022*"’" + 0.015*"e" + 0.015*"blah" + 0.007*"w" + 0.007*"z" + 0.007*"beat" '
+  '+ 0.007*"dixz" + 0.006*"und" + 0.006*"faggtblah" + 0.005*"george"'),
+ (1,
+  '0.013*"year" + 0.012*"school" + 0.009*"new" + 0.008*"song" + 0.008*"c" + '
+  '0.007*"b" + 0.007*"album" + 0.006*"university" + 0.006*"f" + 0.006*"th"'),
+ (2,
+  '0.030*"game" + 0.022*"prick" + 0.019*"film" + 0.015*"character" + '
+  '0.013*"rock" + 0.012*"banana" + 0.012*"movie" + 0.009*"video" + '
+  '0.007*"rape" + 0.006*"moon"'),
+ (3,
+  '0.034*"name" + 0.020*"link" + 0.018*"px" + 0.013*"site" + 0.012*"added" + '
+  '0.011*"middle" + 0.011*"map" + 0.011*"team" + 0.009*"padding" + 0.008*"em"'),
+ (4,
+  '0.017*"know" + 0.017*"like" + 0.014*"get" + 0.013*"one" + 0.012*"think" + '
+  '0.012*"time" + 0.009*"would" + 0.009*"go" + 0.008*"good" + 0.008*"people"'),
+ (5,
+  '0.057*"image" + 0.034*"use" + 0.021*"copyright" + 0.020*"page" + '
+  '0.017*"fair" + 0.016*"please" + 0.014*"see" + 0.014*"picture" + '
+  '0.013*"medium" + 0.013*"wikipedia"'),
+ (6,
+  '0.060*"poop" + 0.055*"suck" + 0.027*"fart" + 0.014*"reedelliot" + '
+  '0.013*"ball" + 0.010*"barbercallum" + 0.009*"jelaton" + 0.009*"king" + '
+  '0.009*"sexbutt" + 0.008*"serbia"'),
+ (7,
+  '0.069*"article" + 0.039*"deletion" + 0.029*"deleted" + 0.024*"page" + '
+  '0.021*"tag" + 0.018*"please" + 0.017*"may" + 0.017*"speedy" + 0.014*"band" '
+  '+ 0.013*"notable"'),
+ (8,
+  '0.016*"people" + 0.011*"fact" + 0.008*"wikipedia" + 0.007*"even" + '
+  '0.007*"person" + 0.006*"say" + 0.006*"said" + 0.006*"claim" + 0.006*"one" + '
+  '0.005*"personal"'),
+ (9,
+  '0.035*"page" + 0.030*"help" + 0.030*"wikipedia" + 0.019*"welcome" + '
+  '0.019*"question" + 0.018*"article" + 0.017*"please" + 0.016*"•" + '
+  '0.012*"ask" + 0.012*"talk"'),
+ (10,
+  '0.031*"utc" + 0.018*"black" + 0.009*"july" + 0.009*"·" + 0.009*"car" + '
+  '0.007*"september" + 0.007*"august" + 0.007*"june" + 0.007*"january" + '
+  '0.007*"se"'),
+ (11,
+  '0.027*"sex" + 0.025*"faggot" + 0.024*"redirect" + 0.021*"de" + 0.016*"city" '
+  '+ 0.016*"“" + 0.016*"”" + 0.015*"’" + 0.014*"youi" + 0.011*"–"'),
+ (12,
+  '0.151*"fuck" + 0.045*"gay" + 0.020*"youfuck" + 0.010*"در" + 0.008*"که" + '
+  '0.007*"از" + 0.007*"orly" + 0.005*"به" + 0.004*"ان" + 0.003*"بر"'),
+ (13,
+  '0.094*"wtf" + 0.080*"u" + 0.039*"penis" + 0.026*"nigga" + 0.021*"hell" + '
+  '0.020*"jizz" + 0.019*"kill" + 0.015*"dont" + 0.014*"phck" + 0.012*"im"'),
+ (14,
+  '0.092*"omfg" + 0.034*"nyan" + 0.030*"hate" + 0.021*"idiot" + 0.020*"love" + '
+  '0.019*"و" + 0.015*"da" + 0.015*"god" + 0.014*"jew" + 0.012*"cucks"'),
+ (15,
+  '0.081*"cunt" + 0.054*"nigger" + 0.052*"fucking" + 0.047*"shit" + '
+  '0.042*"dick" + 0.030*"cock" + 0.026*"bitch" + 0.024*"asshole" + 0.021*"as" '
+  '+ 0.018*"stupid"'),
+ (16,
+  '0.075*"page" + 0.032*"please" + 0.031*"talk" + 0.031*"edit" + '
+  '0.020*"thanks" + 0.019*"edits" + 0.018*"comment" + 0.016*"user" + '
+  '0.015*"discussion" + 0.013*"thank"'),
+ (17,
+  '0.015*"english" + 0.014*"state" + 0.012*"language" + 0.010*"american" + '
+  '0.010*"country" + 0.009*"war" + 0.008*"world" + 0.007*"people" + 0.007*"u" '
+  '+ 0.007*"name"'),
+ (18,
+  '0.046*"wikipedia" + 0.031*"blocked" + 0.028*"block" + 0.027*"editing" + '
+  '0.023*"stop" + 0.022*"please" + 0.022*"admins" + 0.022*"account" + '
+  '0.020*"user" + 0.019*"continue"'),
+ (19,
+  '0.038*"article" + 0.016*"source" + 0.011*"would" + 0.010*"section" + '
+  '0.010*"one" + 0.008*"also" + 0.007*"reference" + 0.006*"think" + '
+  '0.006*"information" + 0.006*"need"')]
