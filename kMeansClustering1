@@ -1,0 +1,246 @@
+library(tm)
+library(stringr)
+library(lettercase)
+library(tidytext)
+library(syuzhet)
+library(dplyr)
+library(class)
+library(randomForest)
+
+train = read.csv("C:\\Users\\Iita\\Documents\\machinelearningresources\\commenttrain.csv")
+test = read.csv("C:\\Users\\Iita\\Documents\\machinelearningresources\\commenttest.csv")
+
+allcom = rbind(train[,-(3:8)], test)
+allcom$comment_text = gsub("\n", " ", allcom$comment_text )
+
+
+corpsify = function(x){
+  x = tm_map(x, tolower)
+  x = tm_map(x, removePunctuation)
+  x = tm_map(x, removeNumbers)
+  x = tm_map(x, removeWords, c(stopwords("english")))
+  x = tm_map(x, stripWhitespace)
+  x = tm_map(x, stemDocument)
+  return(x)
+}
+
+create_top = function(x){
+  top500 = names(x[tail(order(x), n=500L)])
+}
+# needs data in data$comment_text format
+create_freq = function(data){
+  corpus = Corpus(VectorSource(data))
+  corpus = corpsify(corpus)
+  frequencyvector = DocumentTermMatrix(corpus)
+  frequencyvector = removeSparseTerms(frequencyvector, 0.995)
+  freq = colSums(as.matrix(frequencyvector))
+  return(freq)
+}
+
+create_500 = function(data){create_top(create_freq(data))}
+
+
+list_subsets = list(subset(train$comment_text, train$toxic==1), subset(train$comment_text, train$severe_toxic==1),
+                    subset(train$comment_text, train$obscene==1), subset(train$comment_text, train$threat==1), subset(train$comment_text, train$insult==1),
+                    subset(train$comment_text, train$identity_hate==1), subset(train$comment_text, train$toxic==0))
+
+
+
+
+list_tops = lapply(list_subsets, create_500)
+
+
+#removing words in common
+removecommon = function(topwords1, topwords2){
+  topwords1 = setdiff(topwords1, intersect(topwords1,topwords2))
+  return(topwords1)
+}
+
+# to remove top 500 in all words from top 500 toxic words, 
+# topwords1 = top_toxic, topwords2 = top_all
+cleantoplist = list(1,2,3,4,5,6)
+x=1
+while(x <length(list_tops)){
+  cleantoplist[[x]] = removecommon(list_tops[[x]],list_tops[[length(list_tops)]])
+  x = x+1
+}
+
+cleantoplist
+
+cleanneutral = 1
+y = 1
+while(y < length(list_tops)){
+  cleanneutral = removecommon(list_tops[length(list_tops)], list_tops[y])
+  y = y+1
+}
+
+cleantoplist = c(cleantoplist, cleanneutral)
+
+cleantoplist
+
+
+#########################################################################################
+# generating full set of data for proportion of given corpus' words in given comment
+
+
+list_freqs = lapply(list_subsets, create_freq)
+
+
+
+frequencies_all = list()
+i = 1
+while(i <= length(allcom$comment_text)){
+  frequencies_all[[i]] = names(create_freq(allcom$comment_text[i]))
+  i = i+1
+}
+
+
+comparecorpus = function(topwords, commentwords){
+  length(intersect(topwords, commentwords))/length(commentwords)
+}
+
+
+proportions = function(topwords){
+  wordlistvector = 1:20
+  for(i in 1:length(allcom$comment_text)){
+    wordlistvector[i] = comparecorpus(topwords, frequencies_all[[i]])
+  }
+  return(wordlistvector)
+}
+
+#returns a vector of all comments' proportion of top toxic words, hopefully
+comments_toxic = proportions(cleantoplist[[1]])
+
+corpusproportions = list() # will end up as a list of all cleaned toplists' proportions to all comments; 7 superlists
+x = 1
+while(x <= length(cleantoplist)){
+  corpusproportions[[x]] = proportions(cleantoplist[[x]])
+  x = x+1
+}
+
+
+
+#sentiment generation, in groups because previous method was so heavy
+sentiment1 = get_sentiment(allcom$comment_text[1:52000], method="afinn")
+sentiment2 = get_sentiment(allcom$comment_text[52001:104000], method = "afinn")
+sentiment3 = get_sentiment(allcom$comment_text[104001:156000], method = "afinn")
+sentiment4 = get_sentiment(allcom$comment_text[156001:208000], method="afinn")
+sentiment5 = get_sentiment(allcom$comment_text[208001:260000], method="afinn")
+sentiment6 = get_sentiment(allcom$comment_text[260001:312735], method="afinn")
+
+sentiment = c(sentiment1, sentiment2, sentiment3, sentiment4, sentiment5, sentiment6)
+
+
+
+
+corpus_proportions = cbind(corpusproportions[[1]], corpusproportions[[2]],corpusproportions[[3]],
+                         corpusproportions[[4]], corpusproportions[[5]], corpusproportions[[6]],
+                         corpusproportions[[7]], sentiment)
+
+corpus_proportions[is.na(corpus_proportions)==TRUE] = 0
+
+
+normalize = function(x){
+  return((x-min(x))/ (max(x)-min(x)))
+}
+
+corpus_proportions[,8] = normalize(corpus_proportions[,8])
+
+summary(corpus_proportions)
+
+
+
+# this is just what needs to be done to comments to get anything useful out of them outside the corpus
+
+cleancomments = function(cleaned){
+  cleaned = removePunctuation(cleaned)
+  cleaned = removeNumbers(cleaned)
+  cleaned = stripWhitespace(cleaned)
+  cleaned = gsub("\n", "",cleaned)
+  return(cleaned)
+}
+
+
+
+caps = allcom$comment_text
+caps = cleancomments(caps)
+
+caps = strsplit(caps, "")
+
+capssum = lapply(caps, is_upper)
+capssum = lapply(capssum, sum)
+capssum = unlist(capssum)
+
+commentletters = function(x){ 
+  str_length(gsub(" ", "", x))
+}
+
+#needs unlist(lapply) to get vectors instead of whatever [[1]] is
+
+commentlengths = unlist(lapply(allcom$comment_text, commentletters))
+capsprop = capssum/commentlengths
+
+corpus_proportions = cbind(1:312735,corpus_proportions, capsprop)
+
+colnames(corpus_proportions) = c("id","toxic","severe_toxic","obscene","threat","insult","identity_hate","neutral","sentiment",
+                                "capsprop")
+
+
+clusters = kmeans(corpus_proportions, 10)
+clustersf = as.factor(clusters$cluster)
+clusters$centers
+
+get_distances = function(y){
+distances_1 = list()
+  for(x in 1:nrow(corpus_proportions)){
+  distances_1[[x]] = dist(rbind(clusters$centers[y,],corpus_proportions[x,2:10]))
+  }
+distances_1 = unlist(distances_1)
+return(distances_1)
+}
+
+all_dist = list()
+for(y in 1:10){
+  all_dist[[y]] = get_distances(y)
+}
+
+distances = cbind(all_dist[[1]],all_dist[[2]],all_dist[[3]],all_dist[[4]],all_dist[[5]],
+                  all_dist[[6]],all_dist[[7]],all_dist[[8]],all_dist[[9]],all_dist[[10]])
+
+
+center_m = cbind(corpus_proportions[,1], distances)
+
+
+allcom$comment_text[center_m[which((center_m[,3]-min(center_m[,3]))<0.02),1]]
+
+
+
+
+
+
+get_centers = function(y){
+  distances = list()
+  for(x in 1:nrow(corpus_proportions)){
+    distances[[x]] = dist(rbind(clusters$centers[y,],corpus_proportions[x,2:10]))
+  }
+  distances = unlist(distances)
+  
+  center_1 = cbind(corpus_proportions, distances)
+  
+  
+  mostcenter = allcom$comment_text[center_1[which.min(center_1[,10]),][1]]
+  return(mostcenter)
+  
+}
+
+train1 = corpus_proportions[1:159571,]
+clusters_1 = kmeans(train1, 10)$cluster
+clustersf_1 = as.factor(clusters_1)
+par(mfrow=c(2,2))
+
+plot(train1[,1], train1[,7], col=clustersf_1, pch=train[,3], xlab="% of toxic words", ylab="% of neutral words")
+plot(train1[,1], train1[,8], col=clustersf_1, pch=train[,3], xlab="% of toxic words", ylab="sentiment value")
+plot(train1[,1], train1[,9], col=clustersf_1, pch=train[,3], xlab="% of toxic words", ylab="% of uppercase letters")
+plot(train1[,1], train1[,2], col=clustersf_1, pch=train[,3], xlab="% of toxic words", ylab="% of severe toxic words")
+
+test1 = corpus_proportions[159572:312735,]
