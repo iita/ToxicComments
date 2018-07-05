@@ -24,9 +24,7 @@ corpsify = function(x){
   return(x)
 }
 
-create_top = function(x){
-  top500 = names(x[tail(order(x), n=500L)])
-}
+
 # needs data in data$comment_text format
 create_freq = function(data){
   corpus = Corpus(VectorSource(data))
@@ -37,7 +35,11 @@ create_freq = function(data){
   return(freq)
 }
 
-create_500 = function(data){create_top(create_freq(data))}
+create_top = function(x){
+  top500 = names(x[tail(order(x), n=500L)])
+}
+
+create_500 = function(data){create_top(create_freq(data))} #data$comment_text!
 
 
 list_subsets = list(subset(train$comment_text, train$toxic==1), subset(train$comment_text, train$severe_toxic==1),
@@ -58,7 +60,7 @@ removecommon = function(topwords1, topwords2){
 
 # to remove top 500 in all words from top 500 toxic words, 
 # topwords1 = top_toxic, topwords2 = top_all
-cleantoplist = list(1,2,3,4,5,6)
+cleantoplist = list()
 x=1
 while(x <length(list_tops)){
   cleantoplist[[x]] = removecommon(list_tops[[x]],list_tops[[length(list_tops)]])
@@ -83,8 +85,8 @@ cleantoplist
 # generating full set of data for proportion of given corpus' words in given comment
 
 
-list_freqs = lapply(list_subsets, create_freq)
-
+#list_freqs = lapply(list_subsets, create_freq)
+#useless so far
 
 
 frequencies_all = list()
@@ -144,7 +146,8 @@ normalize = function(x){
   return((x-min(x))/ (max(x)-min(x)))
 }
 
-corpus_proportions[,8] = normalize(corpus_proportions[,8])
+corpus_proportions[,8] = normalize(corpus_proportions[,8]) #maybe try without
+
 
 summary(corpus_proportions)
 
@@ -190,6 +193,7 @@ clusters = kmeans(corpus_proportions, 10)
 clustersf = as.factor(clusters$cluster)
 clusters$centers
 
+#function to get euclidian distances of all comments to centers of clusters
 get_distances = function(y){
 distances_1 = list()
   for(x in 1:nrow(corpus_proportions)){
@@ -204,17 +208,17 @@ for(y in 1:10){
   all_dist[[y]] = get_distances(y)
 }
 
+#need to do this better
 distances = cbind(all_dist[[1]],all_dist[[2]],all_dist[[3]],all_dist[[4]],all_dist[[5]],
                   all_dist[[6]],all_dist[[7]],all_dist[[8]],all_dist[[9]],all_dist[[10]])
 
 
+#matrix of distances with ID to make it possible to call comments from allcom$comment_text
 center_m = cbind(corpus_proportions[,1], distances)
 
 
+#text of comments that are less than 0.02 away from the center of the 3rd cluster (ID of distances where distance-min(distance)<0.02)
 allcom$comment_text[center_m[which((center_m[,3]-min(center_m[,3]))<0.02),1]]
-
-
-
 
 
 
@@ -232,6 +236,7 @@ get_centers = function(y){
   return(mostcenter)
   
 }
+
 
 train1 = corpus_proportions[1:159571,]
 clusters_1 = kmeans(train1, 10)$cluster
