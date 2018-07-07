@@ -136,8 +136,8 @@ sentiment = c(sentiment1, sentiment2, sentiment3, sentiment4, sentiment5, sentim
 
 
 corpus_proportions = cbind(corpusproportions[[1]], corpusproportions[[2]],corpusproportions[[3]],
-                         corpusproportions[[4]], corpusproportions[[5]], corpusproportions[[6]],
-                         corpusproportions[[7]], sentiment)
+                           corpusproportions[[4]], corpusproportions[[5]], corpusproportions[[6]],
+                           corpusproportions[[7]], sentiment)
 
 corpus_proportions[is.na(corpus_proportions)==TRUE] = 0
 
@@ -186,7 +186,7 @@ capsprop = capssum/commentlengths
 corpus_proportions = cbind(1:312735,corpus_proportions, capsprop)
 
 colnames(corpus_proportions) = c("id","toxic","severe_toxic","obscene","threat","insult","identity_hate","neutral","sentiment",
-                                "capsprop")
+                                 "capsprop")
 
 
 clusters = kmeans(corpus_proportions, 10)
@@ -195,12 +195,12 @@ clusters$centers
 
 #function to get euclidian distances of all comments to centers of clusters
 get_distances = function(y){
-distances_1 = list()
+  distances_1 = list()
   for(x in 1:nrow(corpus_proportions)){
-  distances_1[[x]] = dist(rbind(clusters$centers[y,],corpus_proportions[x,2:10]))
+    distances_1[[x]] = dist(rbind(clusters$centers[y,],corpus_proportions[x,2:10]))
   }
-distances_1 = unlist(distances_1)
-return(distances_1)
+  distances_1 = unlist(distances_1)
+  return(distances_1)
 }
 
 all_dist = list()
@@ -208,35 +208,46 @@ for(y in 1:10){
   all_dist[[y]] = get_distances(y)
 }
 
-#need to do this better
-distances = cbind(all_dist[[1]],all_dist[[2]],all_dist[[3]],all_dist[[4]],all_dist[[5]],
-                  all_dist[[6]],all_dist[[7]],all_dist[[8]],all_dist[[9]],all_dist[[10]])
+
+distances = matrix(unlist(all_dist), ncol=10, byrow=F)
+colnames(distances) = c("dist1", "dist2", "dist3", "dist4", "dist5", "dist6", "dist7", "dist8", "dist9", "dist10")
 
 
 #matrix of distances with ID to make it possible to call comments from allcom$comment_text
 center_m = cbind(corpus_proportions[,1], distances)
 
-
 #text of comments that are less than 0.02 away from the center of the 3rd cluster (ID of distances where distance-min(distance)<0.02)
-allcom$comment_text[center_m[which((center_m[,3]-min(center_m[,3]))<0.02),1]]
+allcom$comment_text[center_m[which((center_m[,3]-min(center_m[,3]))<0.01),1]]
 
 
-
-get_centers = function(y){
-  distances = list()
-  for(x in 1:nrow(corpus_proportions)){
-    distances[[x]] = dist(rbind(clusters$centers[y,],corpus_proportions[x,2:10]))
-  }
-  distances = unlist(distances)
-  
-  center_1 = cbind(corpus_proportions, distances)
-  
-  
-  mostcenter = allcom$comment_text[center_1[which.min(center_1[,10]),][1]]
-  return(mostcenter)
-  
+get_closest = function(clustern, distance){
+  centroid = allcom$comment_text[center_m[which((center_m[,clustern]-min(center_m[,clustern]))<distance),1]]
+  return(centroid)
 }
 
+get_center = function(clustern){
+  centroid = center_m[which.min(center_m[,clustern]),]
+  return(centroid)
+}
+
+get_closest(5,0.01)
+get_center(5)
+
+allcom$comment_text[get_center(5)[1]]
+
+centers = list()
+
+for(i in 2:ncol(center_m)){
+  centers[[i-1]] = get_center(i)[2:11]
+}
+library("plotly")
+
+centers_m = matrix(unlist(centers),nrow=10, byrow=T)
+
+plot_ly(type="scatter3d", x=center_m[,2], y=center_m[,3], z=center_m[,4], mode="markers")
+plot_ly(as.data.frame(corpus_proportions), x=~toxic, y=~neutral, z= ~capsprop, color=~sentiment)
+
+allcom$comment_text[centers[[2]]]
 
 train1 = corpus_proportions[1:159571,]
 clusters_1 = kmeans(train1, 10)$cluster
@@ -249,3 +260,44 @@ plot(train1[,1], train1[,9], col=clustersf_1, pch=train[,3], xlab="% of toxic wo
 plot(train1[,1], train1[,2], col=clustersf_1, pch=train[,3], xlab="% of toxic words", ylab="% of severe toxic words")
 
 test1 = corpus_proportions[159572:312735,]
+
+
+alldata = cbind(corpus_proportions, distances)
+
+train_1 = alldata[1:159571,]
+test_1 = alldata[159571:312735,]
+train_labels = train[1:159571,3:8]
+colnames(train_labels) = c("Toxic", "Severe", "Obscene", "Threat", "Insult", "Identity")
+
+train_2 = cbind(train_1,train_labels)
+
+tree_create = function(label){
+  randomForest(as.factor(label) ~ toxic+severe_toxic+obscene+threat+insult+identity_hate+neutral+sentiment+capsprop
+               +dist1+dist2+dist3+dist4+dist5+dist6+dist7+dist8+dist9+dist10, data=train_2, importance=TRUE, ntree=200)
+}
+
+
+start_time = Sys.time()
+
+trees = list()
+#for(u in range(21:26)){
+#  trees[[u]] = tree_create(train_2[,u])
+#}
+
+trees[[1]] = tree_create(train_2[,21])
+trees[[2]] = tree_create(train_2[,22])
+trees[[3]] = tree_create(train_2[,23])
+trees[[4]] = tree_create(train_2[,24])
+trees[[5]] = tree_create(train_2[,25])
+trees[[6]] = tree_create(train_2[,26])
+
+
+
+predictions = list()
+for(i in 1:length(trees)){
+  predictions[[i]] = predict(trees[[i]], test_1,type="prob")[,2]
+}
+
+end_time = Sys.time()
+
+(end_time - start_time)
